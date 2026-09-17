@@ -154,6 +154,38 @@ def pushplus_bot(title: str, content: str) -> None:
         log.warning("PushPlus 请求失败: %s", exc)
 
 
+def wxpusher(title: str, content: str) -> None:
+    """使用 WxPusher appToken 和 topicId 发送文本消息。
+
+    请求体与 AutoSign 的云端脚本保持一致；推送失败只记录日志，不影响签到结果。
+    """
+    app_token = _value("WXPUSHER_APPTOKEN")
+    raw_topic_id = _value("WXPUSHER_TOPICID")
+    if not app_token or not raw_topic_id:
+        return
+    try:
+        topic_id = int(raw_topic_id)
+    except ValueError:
+        log.warning("WxPusher 推送失败: WXPUSHER_TOPICID 必须是整数")
+        return
+
+    try:
+        response = requests.post(
+            "https://wxpusher.zjiecode.com/api/send/message",
+            json={
+                "appToken": app_token,
+                "content": content,
+                "summary": title,
+                "contentType": 1,
+                "topicIds": [topic_id],
+            },
+            timeout=REQUEST_TIMEOUT,
+        ).json()
+        _report("WxPusher", response, response.get("code") == 1000)
+    except (ValueError, requests.RequestException) as exc:
+        log.warning("WxPusher 推送请求失败: %s", exc)
+
+
 def wecom_key(title: str, content: str) -> None:
     """通过企业微信群机器人发送文本；长正文由 send 分段调用。"""
     key = _value("QYWX_KEY")
@@ -249,6 +281,7 @@ def send(title: str, content: str) -> None:
     dingding_bot(title, content)
     coolpush_bot(title, content)
     pushplus_bot(title, content)
+    wxpusher(title, content)
     wecom_app(title, content)
 
     # 企业微信机器人单条文本上限约 2,000 字符，按正文切分避免被接口拒绝。

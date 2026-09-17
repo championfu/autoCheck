@@ -114,7 +114,7 @@ JavBus 的多个账号也支持顶层共享 `url`（模板默认 `https://www.ja
 
 ### 推送配置（可选）
 
-复制 `config/services/push.example.json` 为 `config/push.json` 后可配置通知。支持 Bark、Telegram、钉钉、PushPlus、企业微信与飞书。未配置任何渠道时不会发送通知。
+复制 `config/services/push.example.json` 为 `config/push.json` 后可配置通知。支持 Bark、Telegram、钉钉、PushPlus、企业微信、飞书与 WxPusher。未配置任何渠道时不会发送通知。
 
 ```powershell
 Copy-Item config/services/push.example.json config/push.json
@@ -123,6 +123,15 @@ Copy-Item config/services/push.example.json config/push.json
 也可在调度器中使用 `PUSH_CONFIG` 环境变量传入同样的 JSON 对象。
 
 通知正文会显示已执行服务的成功数、每个账号的签到结果，以及服务返回的积分或里程信息。失败账号会显示经过安全清理的失败原因；密码、Cookie 和 Token 不会写入通知。
+
+WxPusher 使用与 `AutoSign` 云端脚本相同的接口。配置 `WXPUSHER_APPTOKEN` 和数字形式的 `WXPUSHER_TOPICID`：
+
+```json
+{
+  "WXPUSHER_APPTOKEN": "AT_your_app_token",
+  "WXPUSHER_TOPICID": "40802"
+}
+```
 
 ## 运行与测试
 
@@ -164,7 +173,7 @@ GitHub Actions 工作流每天 UTC 00:00 执行，也支持手动触发。请在
 | `AIRPORT_ACCOUNTS`   | AirPort 账号数组       |
 | `JAVBUS_ACCOUNTS`    | JavBus 账号数组        |
 | `AUTOCHECK_ACCOUNTS` | 任意服务的聚合账号对象 |
-| `PUSH_CONFIG`        | 推送配置对象           |
+| `PUSH_CONFIG`        | 推送配置对象（WxPusher 字段见上文） |
 | `USER_AGENT`         | 全局 User-Agent        |
 
 青龙同样可使用这些环境变量；未设置变量时程序会回退到本地 JSON 配置。
