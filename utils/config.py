@@ -15,7 +15,8 @@ PUSH_CONFIG = ROOT_PATH / "config" / "push.json"
 ACCOUNTS_BUNDLE_ENV_KEY = "AUTOCHECK_ACCOUNTS"
 # 仅为站点地址在同一账号组中固定的服务声明可继承字段；不提供字段别名。
 SERVICE_SHARED_FIELDS = {
-    "YuChen": ("url",), "GlaDos": ("url",), "JavBus": ("url",), "Manwa": ("base_url",),
+    "YuChen": ("url",), "GlaDos": ("url",), "JavBus": ("url",),
+    "Manwa": ("base_url", "server_ip", "network_interface"),
 }
 # 用于判断同一服务中的同一账号。字段值不会写入日志，避免泄露凭据。
 SERVICE_ACCOUNT_ID_FIELDS = {

@@ -3,8 +3,10 @@
 import base64
 import hashlib
 import json
+import tempfile
 import unittest
 from http.client import HTTPMessage
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -14,6 +16,7 @@ from Crypto.Util.Padding import pad
 
 from checkin import manwa
 from tests.live_helpers import run_configured_service
+from tests import manwa_manual
 from utils import config
 
 
@@ -27,6 +30,7 @@ def encrypted_response(request, data: dict, status: int = 200, cookie: bool = Fa
     response._content = base64.b64encode(AES.new(key, AES.MODE_ECB).encrypt(
         pad(json.dumps(data).encode(), 16),
     ))
+    response._content = json.dumps(response._content.decode()).encode()
     headers = HTTPMessage()
     if cookie:
         headers.add_header("Set-Cookie", "test_session=test-cookie; Path=/")
@@ -43,6 +47,54 @@ class ManwaUnitTests(unittest.TestCase):
         ), {"code": 1, "data": {}, "msg": "ok"})
         expected = hashlib.md5(b"1700000000000,jsdaghuiaonfyudsfnkgjdfkdd").hexdigest()
         self.assertEqual(manwa._headers("1700000000000")["X-Token"], expected)
+
+    def test_json_wrapped_ciphertext(self):
+        ciphertext = "VYlpxw+tIazfDknzcGGDsOHDYLKXdvYfSTigXvhAzKI="
+        self.assertEqual(manwa._decode_response(
+            json.dumps(ciphertext).encode(), "1700000000000",
+        )["code"], 1)
+
+    @patch("checkin.manwa.sys.platform", "darwin")
+    @patch("checkin.manwa.socket.if_nametoindex", return_value=7)
+    @patch("checkin.manwa.create_connection")
+    def test_direct_connection_preserves_host_and_binds_only_its_socket(self, connect, _index):
+        from urllib3.poolmanager import pool_classes_by_scheme
+
+        original = pool_classes_by_scheme.copy()
+        adapter = manwa._direct_adapter("192.0.2.1", "en0")
+        pool = adapter.poolmanager.connection_from_url("https://manwa.example")
+        connection = pool.ConnectionCls("manwa.example", port=443, timeout=3)
+        self.assertIs(connection._new_conn(), connect.return_value)
+        self.assertEqual(connection.host, "manwa.example")
+        args, kwargs = connect.call_args
+        self.assertEqual(args[0], ("192.0.2.1", 443))
+        self.assertIn((manwa.socket.IPPROTO_IP, 25, 7), kwargs["socket_options"])
+        self.assertEqual(pool_classes_by_scheme, original)
+
+    @patch("checkin.manwa._request")
+    def test_incomplete_direct_configuration_makes_no_request(self, request):
+        result = manwa.checkin("https://manwa.example", "u", "p", server_ip="192.0.2.1")
+        self.assertFalse(result["success"])
+        request.assert_not_called()
+
+    @patch("checkin.manwa.sys.platform", "linux")
+    def test_unsupported_direct_platform_reports_safe_failure(self):
+        result = manwa.checkin("https://manwa.example", "u", "p", "192.0.2.1", "en0")
+        self.assertFalse(result["success"])
+        self.assertIn("macOS", result["message"])
+
+    @patch("checkin.manwa.checkin", return_value={"success": True})
+    @patch("utils.service_runner.log")
+    def test_optional_direct_fields_are_forwarded_but_not_required(self, _log, checkin):
+        accounts = [
+            {"base_url": "https://manwa.example", "username": "a", "password": "p",
+             "server_ip": "192.0.2.1", "network_interface": "en0"},
+            {"base_url": "https://manwa.example", "username": "b", "password": "p"},
+        ]
+        result = manwa.run(accounts)
+        self.assertEqual(result["success"], 2)
+        self.assertEqual(checkin.call_args_list[0].kwargs["server_ip"], "192.0.2.1")
+        self.assertEqual(checkin.call_args_list[1].kwargs["network_interface"], "")
 
     @patch("requests.adapters.HTTPAdapter.send")
     def test_login_cookie_is_reused_for_automatic_checkin(self, send):
@@ -150,6 +202,27 @@ class ManwaUnitTests(unittest.TestCase):
         ])
         self.assertEqual(len(merged), 1)
         self.assertEqual(merged[0]["password"], "high")
+
+    def test_manual_script_records_safe_log_and_exit_status(self):
+        account = {"base_url": "https://manwa.example", "username": "private-user", "password": "private-password"}
+        cases = [
+            ([{"code": 0, "msg": "private-user private-password private-cookie"}], 1),
+            ([{"code": 1}, {"code": 1, "data": {"sign_list": [{"status": "signedtoday"}]}},
+              {"code": 1, "data": {"point": 10}}], 0),
+        ]
+        for responses, expected in cases:
+            with self.subTest(exit_status=expected), tempfile.TemporaryDirectory() as directory:
+                with patch.object(manwa_manual, "ROOT_PATH", Path(directory)), \
+                     patch.object(manwa_manual, "configured_accounts", return_value=[account]), \
+                     patch("checkin.manwa._request", side_effect=responses):
+                    self.assertEqual(manwa_manual.main([]), expected)
+                files = list(Path(directory).glob("manwa-manual-*.log"))
+                self.assertEqual(len(files), 1)
+                content = files[0].read_text(encoding="utf-8")
+                self.assertIn("测试结束", content)
+                self.assertIn("+0800", content)
+                for secret in ("private-user", "private-password", "private-cookie"):
+                    self.assertNotIn(secret, content)
 
 
 if __name__ == "__main__":

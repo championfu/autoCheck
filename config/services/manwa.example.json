@@ -1,5 +1,7 @@
 {
   "base_url": "http://mseeowpm.pro",
+  "server_ip": "",
+  "network_interface": "",
   "accounts": [
     {
       "username": "",

@@ -80,9 +80,11 @@ GlaDos 的多个账号同样可将 `url` 写在顶层（例如 `https://railgun.
 
 JavBus 的多个账号也支持顶层共享 `url`（模板默认 `https://www.javbus.com`），各账号只需填写 `cookies`；账号内单独填写的 `url` 会覆盖顶层值。该服务访问已登录论坛首页触发自动签到，不调用当前会返回年龄验证页面的 `/checkin` 地址。成功日志会显示本次与当前金钱/里程，以及按每日登录 `+1` 里程估算的下一等级剩余天数。
 
-Manwa 的接口地址 `base_url` 可写在顶层，必须是 App 使用的接口线路根地址，不能填写 APK 下载引导页。默认线路来自 App 1.1.27：`http://mseeowpm.pro`。模块调用 App 的无验证码自动登录流程，通过 `requests.Session` 接收服务器 Cookie；随后请求 `GET /api/users/welfare`，进入福利页即触发签到。每次请求生成 `Devid` 和 `X-Token` 签名，响应按 App 的 AES-256-ECB 协议解密。只在返回今日 `signedtoday` 标记时报告成功，积分可能有缓存。账号若被要求验证码，会明确失败，不自动处理验证码。
+Manwa 的接口地址 `base_url` 可写在顶层，必须是 App 使用的接口线路根地址，不能填写 APK 下载引导页。默认线路来自 App 1.1.27：`http://mseeowpm.pro`。模块调用 App 的无验证码自动登录流程，通过 `requests.Session` 接收服务器 Cookie（已观察到 `PHPSESSID` 和 `uid`）；登录成功可能直接触发签到，随后请求 `GET /api/users/welfare` 确认今日状态。每次请求生成 `Devid` 和 `X-Token` 签名，先解析响应的 JSON 字符串包装，再按 App 的 AES-256-ECB 协议解密。只在返回今日 `signedtoday` 标记时报告成功，积分可能有缓存。账号若被要求验证码，会明确失败，不自动处理验证码。
 
-漫蛙协议来自真机请求和 APK 分析；真机已完成签到，但脚本独立请求目前遇到 HTTP 302，尚未完成端到端验证。GitHub Actions 能否访问该线路及无验证码登录能否成功，需要查看实际运行结果；重定向、解密失败或未返回今日签到标记均不会被报告为成功。
+已于 2026-10-03 在 macOS 验证脚本独立自动登录、Cookie 接收、福利状态确认和积分查询成功。当时账号已通过 App 签到，因此尚未验证首次签到的积分增量。VPN 出口返回 HTTP 302 并跳转 Google，同一台电脑通过 Wi-Fi 直连可以返回有效业务数据。
+
+macOS 可选直连字段 `server_ip` 和 `network_interface` 必须一起填写，例如实际接口服务器的 IPv4 地址及 Wi-Fi 接口 `en0`；这两个字段可写在配置顶层或账号内。模块仅将本站请求的套接字绑定到指定接口，保留原始域名用于 Host/TLS 校验，不修改 VPN、系统路由或 DNS。`server_ip` 应来自实际抓包，线路换 IP 后需更新。默认均留空，使用普通网络请求；GitHub Actions/Linux 不应填写这两个 macOS 专用字段，云端出口能否访问仍需另行验证。重定向、解密失败或缺少今日标记均不会被报告为成功。
 
 > 配置仅接受上表列出的标准字段名；`user`、`pass`、`cookie`、`site_url` 等旧字段不会自动转换，缺少标准字段的账号会被该服务跳过。
 
@@ -167,6 +169,15 @@ macOS/Linux 单独验证漫蛙：
 ```bash
 python3 -m tests.test_manwa
 ```
+
+漫蛙手动测试会将请求路径、HTTP 状态、耗时、是否持有 Cookie 和签到结果写入项目根目录的 `manwa-manual-*.log`，不记录凭据或完整响应。只读取 `config/manwa.json`，不发送通知；退出码 `0` 表示全部成功，`1` 表示失败，`130` 表示取消。
+
+```bash
+# 立即执行一次，并保存日志
+python3 -m tests.manwa_manual
+```
+
+日志时间使用北京时间，日志已被 Git 忽略。HTTP 302 会被记录为失败；macOS 若普通请求被重定向，可按上文填写本站直连选项。
 
 汇总测试只读取所有本地 JSON，不读取环境变量，也不发送通知：
 
