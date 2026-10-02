@@ -1,6 +1,6 @@
 # AutoCheck
 
-轻量的多服务签到工具。目前内置 YuChen、GlaDos、AirPort 与 JavBus；每个服务独立运行，单个账号或服务失败不会阻断其余任务。
+轻量的多服务签到工具。目前内置 YuChen、GlaDos、AirPort、JavBus 与 Manwa（漫蛙3）；每个服务独立运行，单个账号或服务失败不会阻断其余任务。
 
 ## 支持的网站
 
@@ -10,6 +10,7 @@
 | GlaDos    | Railgun 网络服务与用户账户管理平台。           | 调用官方签到接口并显示积分。   | 站点首页 URL、登录 Cookie |
 | AirPort   | 泛指机场订阅服务面板；具体站点由用户自行填写。 | 登录面板后请求用户签到接口。   | 站点地址、邮箱、密码     |
 | JavBus    | 影片资料检索网站。                             | 向站点签到地址发送已登录会话。 | 站点地址与登录 Cookie    |
+| Manwa     | 漫蛙3漫画 App。                                | 自动登录后访问福利接口触发签到。 | 接口地址、账号与密码 |
 
 > 不同 AirPort 站点的接口实现可能不同；本项目当前适配 `/auth/login` 和 `/user/checkin` 路径。请仅对你有权使用的账户和站点执行签到。
 
@@ -38,7 +39,8 @@ config/
     ├── yuchen.example.json
     ├── glados.example.json
     ├── airport.example.json
-    └── javbus.example.json
+    ├── javbus.example.json
+    ├── manwa.example.json
     └── push.example.json
 ```
 
@@ -68,6 +70,7 @@ Copy-Item config/services/yuchen.example.json config/yuchen.json
 | GlaDos  | `config/glados.json`  | `url`、`cookies`                    |
 | AirPort | `config/airport.json` | `base_url`、`email`、`password` |
 | JavBus  | `config/javbus.json`  | `url`、`cookies`                  |
+| Manwa   | `config/manwa.json`   | `base_url`、`username`、`password` |
 
 每个文件均支持多账号：将多个对象加入 `accounts` 数组即可。
 
@@ -76,6 +79,10 @@ YuChen 的多个账号共用同一站点时，可将 `url` 写在顶层；账号
 GlaDos 的多个账号同样可将 `url` 写在顶层（例如 `https://railgun.info`），各账号只需填写 `cookies`；账号内单独填写的 `url` 会覆盖顶层值。签到成功日志会显示本次获得积分和当前总积分。
 
 JavBus 的多个账号也支持顶层共享 `url`（模板默认 `https://www.javbus.com`），各账号只需填写 `cookies`；账号内单独填写的 `url` 会覆盖顶层值。该服务访问已登录论坛首页触发自动签到，不调用当前会返回年龄验证页面的 `/checkin` 地址。成功日志会显示本次与当前金钱/里程，以及按每日登录 `+1` 里程估算的下一等级剩余天数。
+
+Manwa 的接口地址 `base_url` 可写在顶层，必须是 App 使用的接口线路根地址，不能填写 APK 下载引导页。默认线路来自 App 1.1.27：`http://mseeowpm.pro`。模块调用 App 的无验证码自动登录流程，通过 `requests.Session` 接收服务器 Cookie；随后请求 `GET /api/users/welfare`，进入福利页即触发签到。每次请求生成 `Devid` 和 `X-Token` 签名，响应按 App 的 AES-256-ECB 协议解密。只在返回今日 `signedtoday` 标记时报告成功，积分可能有缓存。账号若被要求验证码，会明确失败，不自动处理验证码。
+
+漫蛙协议来自真机请求和 APK 分析；真机已完成签到，但脚本独立请求目前遇到 HTTP 302，尚未完成端到端验证。GitHub Actions 能否访问该线路及无验证码登录能否成功，需要查看实际运行结果；重定向、解密失败或未返回今日签到标记均不会被报告为成功。
 
 > 配置仅接受上表列出的标准字段名；`user`、`pass`、`cookie`、`site_url` 等旧字段不会自动转换，缺少标准字段的账号会被该服务跳过。
 
@@ -152,6 +159,13 @@ WxPusher 使用与 `AutoSign` 云端脚本相同的接口。配置 `WXPUSHER_APP
 .\.venv\Scripts\python.exe -m tests.test_glados
 .\.venv\Scripts\python.exe -m tests.test_airport
 .\.venv\Scripts\python.exe -m tests.test_javbus
+.\.venv\Scripts\python.exe -m tests.test_manwa
+```
+
+macOS/Linux 单独验证漫蛙：
+
+```bash
+python3 -m tests.test_manwa
 ```
 
 汇总测试只读取所有本地 JSON，不读取环境变量，也不发送通知：
@@ -172,6 +186,7 @@ GitHub Actions 工作流每天 UTC 00:00 执行，也支持手动触发。请在
 | `GLADOS_ACCOUNTS`    | GlaDos 账号数组        |
 | `AIRPORT_ACCOUNTS`   | AirPort 账号数组       |
 | `JAVBUS_ACCOUNTS`    | JavBus 账号数组        |
+| `MANWA_ACCOUNTS`     | Manwa 账号数组（每项填写 `base_url`、`username`、`password`） |
 | `AUTOCHECK_ACCOUNTS` | 任意服务的聚合账号对象 |
 | `PUSH_CONFIG`        | 推送配置对象（WxPusher 字段见上文） |
 | `USER_AGENT`         | 全局 User-Agent        |

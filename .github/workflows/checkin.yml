@@ -35,6 +35,7 @@ jobs:
           GLADOS_ACCOUNTS: ${{ secrets.GLADOS_ACCOUNTS }}
           AIRPORT_ACCOUNTS: ${{ secrets.AIRPORT_ACCOUNTS }}
           JAVBUS_ACCOUNTS: ${{ secrets.JAVBUS_ACCOUNTS }}
+          MANWA_ACCOUNTS: ${{ secrets.MANWA_ACCOUNTS }}
           AUTOCHECK_ACCOUNTS: ${{ secrets.AUTOCHECK_ACCOUNTS }}
           PUSH_CONFIG: ${{ secrets.PUSH_CONFIG }}
           USER_AGENT: ${{ secrets.USER_AGENT }}
