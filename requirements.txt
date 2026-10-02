@@ -1,2 +1,4 @@
-# 用于四个签到服务及通知渠道的 HTTP 请求。
+# 用于签到服务及通知渠道的 HTTP 请求。
 requests~=2.31.0
+# 漫蛙 App 接口响应使用 AES 加密。
+pycryptodome~=3.23.0
