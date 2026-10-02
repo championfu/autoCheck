@@ -2,11 +2,12 @@
 
 import base64
 import hashlib
-import json
 import ipaddress
+import json
 import socket
 import sys
 import time
+from datetime import datetime, timedelta, timezone
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -18,14 +19,15 @@ from urllib3.connectionpool import HTTPConnectionPool, HTTPSConnectionPool
 from urllib3.exceptions import NewConnectionError
 from urllib3.util.connection import create_connection
 
-from utils.service_runner import run_accounts
 from utils.logger import log
+from utils.service_runner import run_accounts
 
 SERVICE_NAME = "Manwa"
 CONFIG_FILENAME = "manwa.json"
 ENV_KEY = "MANWA_ACCOUNTS"
 ACCOUNT_FIELDS = ("base_url", "username", "password")
 OPTIONAL_ACCOUNT_FIELDS = ("server_ip", "network_interface")
+BEIJING = timezone(timedelta(hours=8))
 
 # 来自 App 的公开协议常量，不是用户密码或登录凭据。
 SIGN_SALT = "jsdaghuiaonfyudsfnkgjdfkdd"
@@ -148,7 +150,7 @@ def checkin(
     base_url: str, username: str, password: str,
     server_ip: str = "", network_interface: str = "",
 ) -> dict[str, Any]:
-    """自动登录后访问福利页触发签到，并检查今日成功标记。"""
+    """先登录，再调用福利签到接口；只依据该接口判断签到状态。"""
     try:
         parsed = urlsplit(base_url)
     except ValueError:
@@ -180,21 +182,25 @@ def checkin(
                     reason = "漫蛙自动登录需要验证码，当前账号无法无人值守登录"
                 return {"success": False, "message": reason}
 
+            log.info("Manwa 登录成功，继续调用福利签到接口")
+
             welfare = _request(session, "GET", f"{base_url}/api/users/welfare")
             data = welfare.get("data")
             if welfare.get("code") != 1 or not isinstance(data, dict):
                 return {"success": False, "message": "漫蛙福利接口未返回有效签到数据"}
             records = data.get("sign_list")
+            today = datetime.now(BEIJING).date().isoformat()
             if not isinstance(records, list) or not any(
                 isinstance(item, dict) and item.get("status") == "signedtoday"
+                and item.get("date") == today
                 for item in records
             ):
                 return {"success": False, "message": "漫蛙福利接口未确认今日已签到"}
 
-            message = "今日签到已确认（含重复运行时已签到）"
+            message = f"签到接口确认 {today} 已签到（含重复运行时已签到）"
             days = data.get("consecutive_sign")
             if isinstance(days, int) and not isinstance(days, bool) and days >= 0:
-                message += f"，连续签到 {days} 天"
+                message += f"，接口返回连续签到 {days} 天"
             # 积分查询可能有缓存或单独失败，不覆盖已经确认的签到状态。
             try:
                 info = _request(session, "GET", f"{base_url}/api/users/info")

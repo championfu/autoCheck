@@ -11,6 +11,8 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import requests
+
+import main
 from Crypto.Cipher import AES
 from Crypto.Util.Padding import pad
 
@@ -112,7 +114,7 @@ class ManwaUnitTests(unittest.TestCase):
                 self.assertEqual(request.method, "GET")
                 self.assertIsNone(request.body)
                 return encrypted_response(request, {"code": 1, "data": {
-                    "consecutive_sign": 1, "sign_list": [{"status": "signedtoday"}],
+                    "consecutive_sign": 1, "sign_list": [{"status": "signedtoday", "date": manwa.datetime.now(manwa.BEIJING).date().isoformat()}],
                 }})
             return encrypted_response(request, {"code": 1, "data": {"point": 10}})
 
@@ -161,9 +163,78 @@ class ManwaUnitTests(unittest.TestCase):
         self.assertFalse(manwa.checkin("https://manwa.example", "u", "p")["success"])
 
     @patch("checkin.manwa._request")
+    def test_stale_calendar_is_not_reported_as_today_success(self, request):
+        request.side_effect = [
+            {"code": 1, "msg": "登录成功，已签到成功"},
+            {"code": 1, "data": {"sign_list": [{"status": "signedtoday", "date": "2000-01-01"}]}},
+        ]
+        result = manwa.checkin("https://manwa.example", "u", "p")
+        self.assertFalse(result["success"])
+        self.assertEqual(request.call_count, 2)
+
+    def test_production_login_checkin_and_wxpusher_order(self):
+        self._verify_production_notification(login_success=True)
+
+    def test_login_failure_is_included_in_wxpusher_without_checkin(self):
+        self._verify_production_notification(login_success=False)
+
+    def _verify_production_notification(self, login_success: bool) -> None:
+        """在 HTTP 边界模拟服务和推送，执行真实生产汇总链路。"""
+        calls = []
+        service = main.Service("Manwa", "checkin.manwa", "manwa.json", "MANWA_ACCOUNTS")
+        account = {"base_url": "https://manwa.example", "username": "private-user", "password": "private-password"}
+
+        def respond(request, **kwargs):
+            path = manwa.urlsplit(request.url).path
+            calls.append((request.method, path))
+            if path == "/api/account/login":
+                return encrypted_response(request, {
+                    "code": 1 if login_success else 0,
+                    "msg": "登录成功，已签到成功" if login_success else "private-password private-cookie",
+                }, cookie=login_success)
+            if path == "/api/users/welfare":
+                self.assertIn("test_session=test-cookie", request.headers["Cookie"])
+                return encrypted_response(request, {"code": 1, "data": {
+                    "consecutive_sign": 1, "sign_list": [{
+                        "status": "signedtoday", "date": manwa.datetime.now(manwa.BEIJING).date().isoformat(),
+                    }],
+                }})
+            if path == "/api/users/info":
+                return encrypted_response(request, {"code": 1, "data": {"point": 10}})
+            self.assertEqual(request.url, "https://wxpusher.zjiecode.com/api/send/message")
+            payload = json.loads(request.body)
+            self.assertEqual(payload["topicIds"], [123])
+            self.assertIn(f"Manwa：成功 {int(login_success)}/1", payload["content"])
+            if login_success:
+                self.assertIn("签到接口确认", payload["content"])
+                self.assertIn("当前积分 10", payload["content"])
+            else:
+                self.assertIn("自动登录失败", payload["content"])
+            for secret in ("private-user", "private-password", "private-cookie", "test-cookie"):
+                self.assertNotIn(secret, payload["content"])
+            response = requests.Response()
+            response.status_code = 200
+            response._content = b'{"code":1000}'
+            response.raw = SimpleNamespace(_original_response=SimpleNamespace(msg=HTTPMessage()))
+            return response
+
+        with patch("requests.adapters.HTTPAdapter.send", side_effect=respond), \
+             patch.object(main, "discover_services", return_value=[service]), \
+             patch.object(config, "load_all_configs"), \
+             patch.object(config, "ACCOUNT", {"Manwa": [account]}), \
+             patch.object(config, "PUSH", {"WXPUSHER_APPTOKEN": "AT_test", "WXPUSHER_TOPICID": "123"}), \
+             patch.object(main, "SUMMARY", {}), patch("main.signal.signal"):
+            self.assertEqual(main.main(), 0 if login_success else 1)
+        expected = [("POST", "/api/account/login")]
+        if login_success:
+            expected += [("GET", "/api/users/welfare"), ("GET", "/api/users/info")]
+        expected.append(("POST", "/api/send/message"))
+        self.assertEqual(calls, expected)
+
+    @patch("checkin.manwa._request")
     def test_points_failure_preserves_confirmed_checkin(self, request):
         request.side_effect = [
-            {"code": 1}, {"code": 1, "data": {"sign_list": [{"status": "signedtoday"}]}},
+            {"code": 1}, {"code": 1, "data": {"sign_list": [{"status": "signedtoday", "date": manwa.datetime.now(manwa.BEIJING).date().isoformat()}]}},
             requests.Timeout("test-password"),
         ]
         result = manwa.checkin("https://manwa.example", "u", "p")
@@ -207,7 +278,7 @@ class ManwaUnitTests(unittest.TestCase):
         account = {"base_url": "https://manwa.example", "username": "private-user", "password": "private-password"}
         cases = [
             ([{"code": 0, "msg": "private-user private-password private-cookie"}], 1),
-            ([{"code": 1}, {"code": 1, "data": {"sign_list": [{"status": "signedtoday"}]}},
+            ([{"code": 1}, {"code": 1, "data": {"sign_list": [{"status": "signedtoday", "date": manwa.datetime.now(manwa.BEIJING).date().isoformat()}]}},
               {"code": 1, "data": {"point": 10}}], 0),
         ]
         for responses, expected in cases:
