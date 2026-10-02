@@ -21,6 +21,7 @@ def run_accounts(
     fields: AccountFields,
     checkin: CheckinFunction,
     display_field: str | None = None,
+    optional_fields: AccountFields = (),
 ) -> dict[str, Any]:
     """逐账号执行签到，并保证配置或单账号错误不会影响其他账号。
 
@@ -30,10 +31,10 @@ def run_accounts(
     required_names = "/".join(sorted(fields))
 
     for index, account in enumerate(accounts, start=1):
-        values = _standard_account(account, fields)
+        values = _standard_account(account, (*fields, *optional_fields))
         display_name = values.get(display_field, "") if display_field else ""
         display_name = display_name or f"账号{index}"
-        if not all(values.values()):
+        if not all(values[name] for name in fields):
             result = {"username": display_name, "success": False, "message": f"缺少必要配置 ({required_names})"}
             results["failed"] += 1
             results["details"].append(result)
